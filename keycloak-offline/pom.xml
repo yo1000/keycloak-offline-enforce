@@ -1,11 +1,11 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <name>Keycloak Forced Offline token authenticator</name>
+    <name>Keycloak Offline Support Authenticator</name>
     <description/>
 
     <groupId>com.yo1000</groupId>
-    <artifactId>keycloak-offline-enforce</artifactId>
+    <artifactId>keycloak-offline</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 

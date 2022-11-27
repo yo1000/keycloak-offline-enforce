@@ -10,7 +10,7 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>keycloak-offline-enforce</module>
+        <module>keycloak-offline</module>
         <module>keycloak-client-demo</module>
     </modules>
 </project>

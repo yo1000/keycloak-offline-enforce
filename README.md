@@ -24,6 +24,14 @@ else
 fi
 ```
 
+http://localhost:8081/accessToken
+http://localhost:8081/refreshToken
+http://localhost:8081/refreshToken/refresh
+
+http://localhost:8082/accessToken
+http://localhost:8082/refreshToken
+http://localhost:8082/refreshToken/refresh
+
 ```shell
 REFRESH_TOKEN=$(curl -s \
   -XPOST \
