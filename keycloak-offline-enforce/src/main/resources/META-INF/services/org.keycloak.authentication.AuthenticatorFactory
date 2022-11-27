@@ -1,0 +1,2 @@
+com.yo1000.keycloak.provider.offline.OfflineScopeEnforceAuthenticator
+com.yo1000.keycloak.provider.offline.OfflineCookieAuthenticator

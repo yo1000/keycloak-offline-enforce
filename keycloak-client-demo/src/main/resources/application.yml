@@ -1,0 +1,28 @@
+server:
+  port: 8081
+#keycloak:
+#  realm: master
+#  auth-server-url: http://localhost:8080/auth
+#  resource: client-demo
+
+spring:
+  security:
+    oauth2.client:
+      registration:
+        keycloak:
+          provider: keycloak
+          client-id: demo
+          client-name:
+          client-authentication-method: basic
+          authorization-grant-type: authorization_code
+          scope: openid
+          redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+      provider:
+        keycloak:
+          issuer-uri: http://localhost:8080/auth/realms/demo
+          ## Optional
+          #authorization-uri: 'http://localhost:8080/auth/realms/demo/protocol/openid-connect/auth'
+          #token-uri: 'http://localhost:8080/auth/realms/demo/protocol/openid-connect/token'
+          #user-info-uri: 'http://localhost:8080/auth/realms/demo/protocol/openid-connect/userinfo'
+          #jwk-set-uri: 'http://localhost:8080/auth/realms/demo/protocol/openid-connect/certs'
+          user-name-attribute: preferred_username
