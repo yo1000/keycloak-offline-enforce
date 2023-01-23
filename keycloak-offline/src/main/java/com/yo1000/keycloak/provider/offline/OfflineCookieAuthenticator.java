@@ -32,7 +32,10 @@ public class OfflineCookieAuthenticator extends CookieAuthenticator implements A
 
         if (authResult == null) {
             context.attempted();
-        } else {
+            return;
+        }
+
+        try {
             AuthenticationSessionModel clientSession = context.getAuthenticationSession();
             LoginProtocol protocol = context.getSession().getProvider(LoginProtocol.class, clientSession.getProtocol());
 
@@ -46,6 +49,10 @@ public class OfflineCookieAuthenticator extends CookieAuthenticator implements A
                 //context.attachUserSession(authResult.getSession());
                 context.success();
             }
+        } catch (Exception e) {
+            logger.info(e.getMessage(), e);
+
+            context.attempted();
         }
     }
 
