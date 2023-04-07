@@ -32,21 +32,34 @@ public class OfflineCookieAuthenticator extends CookieAuthenticator implements A
 
         if (authResult == null) {
             context.attempted();
-        } else {
-            AuthenticationSessionModel clientSession = context.getAuthenticationSession();
-            LoginProtocol protocol = context.getSession().getProvider(LoginProtocol.class, clientSession.getProtocol());
-
-            // Cookie re-authentication is skipped if re-authentication is required
-            if (protocol.requireReauthentication(authResult.getSession(), clientSession)) {
-                context.attempted();
-            } else {
-                context.getSession().setAttribute(org.keycloak.services.managers.AuthenticationManager.SSO_AUTH, "true");
-                context.setUser(authResult.getUser());
-                // Intentionally not attaching.
-                //context.attachUserSession(authResult.getSession());
-                context.success();
-            }
+            return;
         }
+
+        AuthenticationSessionModel clientSession = context.getAuthenticationSession();
+        LoginProtocol protocol = context.getSession().getProvider(LoginProtocol.class, clientSession.getProtocol());
+
+        // Cookie re-authentication is skipped if re-authentication is required
+        if (protocol.requireReauthentication(authResult.getSession(), clientSession)) {
+            context.attempted();
+            return;
+        }
+
+        long idTokenIat = authResult.getToken().getIat();
+
+        UserModel user = authResult.getUser();
+        String idTokenExpAsString = context.getUser().getFirstAttribute("IDToken manually expiration");
+
+        if (idTokenExpAsString != null && idTokenExpAsString.matches("\\d+") && idTokenIat <= Long.parseLong(idTokenExpAsString)) {
+            context.attempted();
+            return;
+        }
+
+        context.getSession().setAttribute(org.keycloak.services.managers.AuthenticationManager.SSO_AUTH, "true");
+        context.setUser(user);
+        // Intentionally not attaching.
+        //context.attachUserSession(authResult.getSession());
+
+        context.success();
     }
 
     private AuthenticationManager.AuthResult authenticateOfflineIdentityCookie(
