@@ -1,6 +1,6 @@
 package com.yo1000.keycloak.provider.offline;
 
-import org.jboss.logging.Logger;
+import org.jboss.resteasy.spi.HttpRequest;
 import org.keycloak.Config;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.TokenVerifier;
@@ -11,59 +11,175 @@ import org.keycloak.authentication.DisplayTypeAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.AttemptedAuthenticator;
 import org.keycloak.authentication.authenticators.browser.CookieAuthenticator;
 import org.keycloak.common.util.Time;
-import org.keycloak.models.*;
-import org.keycloak.protocol.LoginProtocol;
+import org.keycloak.models.AuthenticationExecutionModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.services.managers.AuthenticationManager;
-import org.keycloak.services.util.CookieHelper;
-import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.util.TokenUtil;
 
 import javax.ws.rs.core.Cookie;
+import javax.ws.rs.core.NewCookie;
+import javax.ws.rs.core.Response;
 import java.util.List;
+import java.util.Optional;
 
 public class OfflineCookieAuthenticator extends CookieAuthenticator implements AuthenticatorFactory, DisplayTypeAuthenticatorFactory {
-    protected static final Logger logger = Logger.getLogger(OfflineCookieAuthenticator.class);
+    public static final String KEYCLOAK_IDENTITY_REMEMBER_COOKIE =
+            AuthenticationManager.KEYCLOAK_IDENTITY_COOKIE + "_REMEMBER";
 
     @Override
     public void authenticate(AuthenticationFlowContext context) {
-        AuthenticationManager.AuthResult authResult = authenticateOfflineIdentityCookie(
-                context.getSession(), context.getRealm(), true);
+        // When KEYCLOAK_SESSION cookie is destroyed,
+        // KEYCLOAK_IDENTITY_REMEMBER cookie must also be destroyed,
+        // since sign-out is considered to have occurred.
+        if (context.getHttpRequest().getHttpHeaders().getCookies().keySet().stream()
+                .noneMatch(cookieName -> cookieName.equals(AuthenticationManager.KEYCLOAK_SESSION_COOKIE))) {
+            Cookie keycloakIdentityRememberCookie = extractCookie(context.getHttpRequest(),
+                    KEYCLOAK_IDENTITY_REMEMBER_COOKIE);
 
+            if (keycloakIdentityRememberCookie != null) {
+                // <Challenge>
+                context.challenge(Response
+                        .temporaryRedirect(context.getRefreshUrl(false))
+                        .cookie(new NewCookie(
+                                keycloakIdentityRememberCookie.getName(),
+                                keycloakIdentityRememberCookie.getValue(),
+                                keycloakIdentityRememberCookie.getPath(),
+                                keycloakIdentityRememberCookie.getDomain(),
+                                "",
+                                0,
+                                false,
+                                false
+                        ))
+                        .build()
+                );
+            } else {
+                // <Attempted>
+                context.attempted();
+            }
+
+            return;
+        }
+
+        Cookie keycloakIdentityRememberCookie = extractCookie(context.getHttpRequest(),
+                KEYCLOAK_IDENTITY_REMEMBER_COOKIE);
+
+        if (!isEmptyValue(keycloakIdentityRememberCookie)) {
+            AuthenticationManager.AuthResult authResult = reconstructAuthResult(
+                    context.getSession(), context.getRealm(), false,
+                    keycloakIdentityRememberCookie.getValue());
+
+            // <Challenge>
+            // When user matching KEYCLOAK_IDENTITY_REMEMBER cookie cannot be found,
+            // The cookie is disposed and user is redirected to Sign-on.
+            if (authResult == null) {
+                context.challenge(Response
+                        .temporaryRedirect(context.getRefreshUrl(false))
+                        .cookie(new NewCookie(
+                                keycloakIdentityRememberCookie.getName(),
+                                keycloakIdentityRememberCookie.getValue(),
+                                keycloakIdentityRememberCookie.getPath(),
+                                keycloakIdentityRememberCookie.getDomain(),
+                                "",
+                                0,
+                                false,
+                                false
+                        ))
+                        .build()
+                );
+                return;
+            }
+
+            // <Success>
+            // When user is found that matches KEYCLOAK_IDENTITY_REMEMBER cookie,
+            // it is assumed that user has successfully authenticated.
+            context.setUser(authResult.getUser());
+            context.success();
+            return;
+        }
+
+        Cookie keycloakIdentityCookie = extractCookie(context.getHttpRequest(),
+                AuthenticationManager.KEYCLOAK_IDENTITY_COOKIE);
+
+        // <Attempted>
+        // When neither KEYCLOAK_IDENTITY_REMEMBER cookie nor KEYCLOAK_IDENTITY cookie are not existed,
+        // user is redirected to sign-in.
+        if (isEmptyValue(keycloakIdentityCookie)) {
+            context.attempted();
+            return;
+        }
+
+        AuthenticationManager.AuthResult authResult =  reconstructAuthResult(
+                context.getSession(), context.getRealm(), false,
+                keycloakIdentityCookie.getValue());
+
+        // <Attempted>
+        // When the key corresponding to a KID has been invalidated due to key replacement, etc.,
+        // the status will be corrected in a subsequent process,
+        // so leave it to the subsequent process and mark ATTEMPTED.
         if (authResult == null) {
             context.attempted();
-        } else {
-            AuthenticationSessionModel clientSession = context.getAuthenticationSession();
-            LoginProtocol protocol = context.getSession().getProvider(LoginProtocol.class, clientSession.getProtocol());
-
-            // Cookie re-authentication is skipped if re-authentication is required
-            if (protocol.requireReauthentication(authResult.getSession(), clientSession)) {
-                context.attempted();
-            } else {
-                context.getSession().setAttribute(org.keycloak.services.managers.AuthenticationManager.SSO_AUTH, "true");
-                context.setUser(authResult.getUser());
-                // Intentionally not attaching.
-                //context.attachUserSession(authResult.getSession());
-                context.success();
-            }
+            return;
         }
+
+        RootAuthenticationSessionModel rootAuthSession = context.getSession().authenticationSessions()
+                .getRootAuthenticationSession(context.getRealm(), authResult.getSession().getId());
+
+        if (rootAuthSession != null) {
+            context.getSession().authenticationSessions()
+                    .removeRootAuthenticationSession(context.getRealm(), rootAuthSession);
+        }
+
+        // <Challenge>
+        // When user is found using KEYCLOAK_IDENTITY cookie,
+        // copy it as KEYCLOAK_IDENTITY_REMEMBER cookie so that it is not lost due to cache volatiles.
+        context.challenge(Response
+                .temporaryRedirect(context.getRefreshUrl(false))
+                .cookie(new NewCookie(
+                        KEYCLOAK_IDENTITY_REMEMBER_COOKIE,
+                        keycloakIdentityCookie.getValue(),
+                        keycloakIdentityCookie.getPath(),
+                        keycloakIdentityCookie.getDomain(),
+                        "",
+                        context.getRealm().getSsoSessionIdleTimeoutRememberMe(),
+                        false,
+                        false
+                ))
+                .build()
+        );
     }
 
-    private AuthenticationManager.AuthResult authenticateOfflineIdentityCookie(
-            KeycloakSession session, RealmModel realm, boolean checkActive
-    ) {
-        Cookie cookie = CookieHelper.getCookie(session.getContext().getRequestHeaders().getCookies(), AuthenticationManager.KEYCLOAK_IDENTITY_COOKIE);
-        if (cookie == null || "".equals(cookie.getValue())) {
-            logger.debugv("Could not find cookie: {0}", AuthenticationManager.KEYCLOAK_IDENTITY_COOKIE);
-            return null;
-        }
+    private boolean isEmptyValue(Cookie cookie) {
+        return cookie == null || cookie.getValue() == null || cookie.getValue().isEmpty();
+    }
 
+    private Cookie extractCookie(HttpRequest request, String name) {
+        return extractOptionalCookie(request, name).orElse(null);
+    }
+
+    private Optional<Cookie> extractOptionalCookie(HttpRequest request, String name) {
+        return extractOptionalCookie(request, name, false);
+    }
+
+    private Optional<Cookie> extractOptionalCookie(HttpRequest request, String name, boolean allowEmptyValue) {
+        return request.getHttpHeaders()
+                .getCookies()
+                .values()
+                .stream()
+                .filter(cookie -> cookie.getName().equals(name) && (allowEmptyValue || !cookie.getValue().isEmpty()))
+                .findFirst();
+    }
+
+    private AuthenticationManager.AuthResult reconstructAuthResult(
+            KeycloakSession session, RealmModel realm, boolean checkActive, String jwt) {
         final boolean IS_COOKIE = false;
 
-        String tokenString = cookie.getValue();
         AuthenticationManager.AuthResult authResult = AuthenticationManager.verifyIdentityToken(
                 session, realm, session.getContext().getUri(), session.getContext().getConnection(),
-                checkActive, false, IS_COOKIE, tokenString, session.getContext().getRequestHeaders(),
+                checkActive, false, IS_COOKIE, jwt, session.getContext().getRequestHeaders(),
                 new TokenVerifier.TokenTypeCheck(TokenUtil.TOKEN_TYPE_KEYCLOAK_ID));
 
         if (authResult == null) {
