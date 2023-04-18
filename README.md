@@ -22,7 +22,7 @@ docker compose down
 ./mvnw clean package
 docker compose up --build &
 
-RETRY_MAX=10
+RETRY_MAX=30
 for i in {1..$RETRY_MAX}; do
   if [[ $(curl -s 'http://localhost:8080/auth/realms/demo/.well-known/openid-configuration') &&  -n "$(docker compose ps | grep -v grep | grep config-script | grep exited)" ]]; then
     READY="1"
