@@ -1,1 +1,1 @@
-com.yo1000.keycloak.provider.offline.OfflineCookieAuthenticator
+com.yo1000.keycloak.provider.offline.OfflineSsoCookieAuthenticator
